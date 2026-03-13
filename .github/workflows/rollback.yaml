@@ -1,0 +1,48 @@
+name: Rollback by Retagging ECR
+
+on:
+  repository_dispatch:
+    types: [rollback_event]
+  workflow_dispatch:
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Retag Previous Image as Latest
+        run: |
+          REPO_NAME=${{ secrets.ECR_REPOSITORY_NAME }}
+          
+          # 1. 'latest'가 아닌 태그 중 가장 최근 것(즉, 바로 이전 버전)을 가져옵니다.
+          PREVIOUS_TAG=$(aws ecr describe-images \
+            --repository-name $REPO_NAME \
+            --query 'sort_by(imageDetails, &imagePushedAt)[-2].imageTags[?@ != `latest`]' \
+            --output text | head -n 1)
+          
+          echo "Found previous version tag: $PREVIOUS_TAG"
+
+          # 2. 해당 이미지의 매니페스트(설정 정보)를 가져옵니다.
+          MANIFEST=$(aws ecr batch-get-image \
+            --repository-name $REPO_NAME \     
+            --image-ids imageTag=$PREVIOUS_TAG \
+            --query 'images[0].imageManifest' \
+            --output text)
+
+          # 3. 가져온 매니페스트에 'latest' 태그를 붙여서 다시 Push합니다. (이미지는 그대로, 태그만 이동)
+          aws ecr put-image \
+            --repository-name $REPO_NAME \
+            --tag latest \
+            --image-manifest "$MANIFEST"
+          
+          echo "Successfully retagged $PREVIOUS_TAG as latest. Deployment will trigger automatically."

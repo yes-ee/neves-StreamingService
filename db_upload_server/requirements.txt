@@ -3,3 +3,6 @@ botocore==1.40.35
 moviepy==1.0.3
 requests==2.32.5
 prometheus-client
+fastapi
+uvicorn
+ddtrace
